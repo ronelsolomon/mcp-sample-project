@@ -64,6 +64,41 @@ class MCPClient:
         except requests.exceptions.RequestException as e:
             print(f"Error generating response: {e}")
             return {"error": str(e)}
+    
+    def list_tools(self) -> list:
+        """List all available tools"""
+        try:
+            response = requests.get(f"{self.base_url}/tools")
+            response.raise_for_status()
+            return response.json().get("tools", [])
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing tools: {e}")
+            return []
+    
+    def execute_tool(self, tool_name: str, **kwargs) -> dict:
+        """
+        Execute a tool with the given parameters
+        
+        Args:
+            tool_name: Name of the tool to execute
+            **kwargs: Parameters to pass to the tool
+            
+        Returns:
+            The tool's response as a dictionary
+        """
+        try:
+            response = requests.post(
+                f"{self.base_url}/tools/execute",
+                json={
+                    "tool_name": tool_name,
+                    "parameters": kwargs
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error executing tool {tool_name}: {e}")
+            return {"error": str(e)}
 
 def interactive_client():
     """Interactive CLI for the MCP client"""
@@ -77,9 +112,11 @@ def interactive_client():
         print("2. Start model")
         print("3. Stop model")
         print("4. Generate response")
-        print("5. Exit")
+        print("5. List tools")
+        print("6. Execute tool")
+        print("7. Exit")
         
-        choice = input("\nEnter your choice (1-5): ").strip()
+        choice = input("\nEnter your choice (1-7): ").strip()
         
         if choice == "1":
             # List models
@@ -135,11 +172,98 @@ def interactive_client():
                 print("\n=== End of Response ===")
                 
         elif choice == "5":
+            # List tools
+            print("\nFetching available tools...")
+            tools = client.list_tools()
+            if tools:
+                print("\nAvailable tools:")
+                for tool in tools:
+                    print(f"\n- {tool['name']}")
+                    print(f"  Description: {tool['description']}")
+                    print(f"  Returns: {tool['return_type']}")
+                    if tool['parameters']:
+                        print("  Parameters:")
+                        for param_name, param_info in tool['parameters'].items():
+                            required = "(required)" if param_info.get('required', False) else "(optional)"
+                            param_type = param_info.get('type', 'any')
+                            if hasattr(param_type, '__name__'):
+                                param_type = param_type.__name__
+                            desc = param_info.get('description', '')
+                            print(f"    - {param_name}: {param_type} {required}")
+                            if desc:
+                                print(f"      {desc}")
+            else:
+                print("No tools found or error fetching tools.")
+                
+        elif choice == "6":
+            # Execute tool
+            tool_name = input("\nEnter tool name to execute: ").strip()
+            if not tool_name:
+                print("Tool name cannot be empty")
+                continue
+                
+            # Get tool info to show required parameters
+            tools = client.list_tools()
+            tool = next((t for t in tools if t['name'] == tool_name), None)
+            
+            if not tool:
+                print(f"Tool '{tool_name}' not found")
+                continue
+                
+            print(f"\nExecuting tool: {tool_name}")
+            print(f"Description: {tool['description']}")
+            
+            # Collect parameters
+            parameters = {}
+            for param_name, param_info in tool['parameters'].items():
+                required = param_info.get('required', False)
+                param_type = param_info.get('type', str)
+                desc = param_info.get('description', '')
+                
+                while True:
+                    try:
+                        prompt = f"  {param_name} ({param_type.__name__ if hasattr(param_type, '__name__') else param_type})"
+                        if desc:
+                            prompt += f" - {desc}"
+                        prompt += ": "
+                        
+                        value = input(prompt).strip()
+                        
+                        if not value and required:
+                            print("  This parameter is required")
+                            continue
+                            
+                        # Try to convert to the specified type
+                        if value:
+                            if param_type == int:
+                                value = int(value)
+                            elif param_type == float:
+                                value = float(value)
+                            elif param_type == bool:
+                                value = value.lower() in ('true', 'yes', 'y', '1')
+                                
+                        parameters[param_name] = value
+                        break
+                        
+                    except ValueError as e:
+                        print(f"  Invalid input: {e}")
+            
+            print("\nExecuting...")
+            result = client.execute_tool(tool_name, **parameters)
+            
+            if 'error' in result:
+                print(f"\nError: {result['error']}")
+            else:
+                print("\n=== Tool Result ===\n")
+                print(result.get('result', 'No result returned'))
+                print("\n==================")
+                
+        elif choice == "7":
             print("\nExiting MCP client. Goodbye!")
             break
             
         else:
-            print("\nInvalid choice. Please enter a number between 1-5.")
+            print("\nInvalid choice. Please enter a number between 1-7.")
 
 if __name__ == "__main__":
     try:

@@ -10,6 +10,22 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import sys
+from pathlib import Path
+
+# Add the current directory to the path so we can import tools
+sys.path.append(str(Path(__file__).parent))
+
+# Import the tool registry
+from tools.registry import get_tool_registry
+from tools.calculator import register_tools as register_calculator_tools
+
+# Register tools
+try:
+    registry = get_tool_registry()
+    register_calculator_tools(registry)
+except Exception as e:
+    print(f"Warning: Failed to register tools: {e}")
 
 # Model state management
 class ModelState(str, Enum):
@@ -184,6 +200,45 @@ async def list_models():
 @app.post("/models/{model_name}/generate", response_model=ModelResponse)
 async def generate_response(model_name: str, request: ModelRequest):
     return mcp.generate(model_name, request)
+
+@app.get("/tools")
+async def list_tools():
+    """List all available tools"""
+    registry = get_tool_registry()
+    return {"tools": registry.list_tools()}
+
+@app.post("/tools/execute")
+async def execute_tool(tool_request: dict):
+    """
+    Execute a tool with the given parameters
+    
+    Request format:
+    {
+        "tool_name": "calculator",
+        "parameters": {
+            "expression": "2 + 2"
+        }
+    }
+    """
+    try:
+        tool_name = tool_request.get("tool_name")
+        parameters = tool_request.get("parameters", {})
+        
+        if not tool_name:
+            raise HTTPException(status_code=400, detail="Missing tool_name")
+            
+        registry = get_tool_registry()
+        result = registry.execute(tool_name, **parameters)
+        
+        return {
+            "success": True,
+            "result": result,
+            "tool_name": tool_name
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     # Add some default models
